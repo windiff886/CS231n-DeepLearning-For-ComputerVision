@@ -38,11 +38,16 @@ def softmax_loss_naive(W, X, y, reg):
         p /= p.sum()  # normalize
         logp = np.log(p)
 
+        dz = p.copy()
+        dz[y[i]] -= 1
+        dW += np.outer(X[i], dz)
+
         loss -= logp[y[i]]  # negative log probability is the loss
 
 
     # normalized hinge loss plus regularization
     loss = loss / num_train + reg * np.sum(W * W)
+    dW = dW / num_train + reg * 2 * W
 
     #############################################################################
     # TODO:                                                                     #
@@ -73,7 +78,12 @@ def softmax_loss_vectorized(W, X, y, reg):
     # Implement a vectorized version of the softmax loss, storing the           #
     # result in loss.                                                           #
     #############################################################################
-
+    scores = X @ W
+    scores -= np.max(scores, axis=1, keepdims=True)
+    exp_scores = np.exp(scores)
+    probs = exp_scores / np.sum(exp_scores, axis=1, keepdims=True)
+    log_probs = -np.log(probs[np.arange(X.shape[0]), y])
+    loss = np.sum(log_probs) / X.shape[0] + reg * reg * np.sum(W * W)
 
     #############################################################################
     # TODO:                                                                     #
@@ -84,6 +94,6 @@ def softmax_loss_vectorized(W, X, y, reg):
     # to reuse some of the intermediate values that you used to compute the     #
     # loss.                                                                     #
     #############################################################################
-
+    dW = 2 * reg * W + X.T @ (probs - np.eye(W.shape[1])[y]) / X.shape[0]
 
     return loss, dW
