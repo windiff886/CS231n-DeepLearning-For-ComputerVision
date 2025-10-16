@@ -211,7 +211,22 @@ class FullyConnectedNet(object):
         # beta2, etc. Scale parameters should be initialized to ones and shift     #
         # parameters should be initialized to zeros.                               #
         ############################################################################
-
+        for i in range(len(hidden_dims) + 1):
+            if i == 0:
+                self.params['W1'] = np.random.normal(0, weight_scale, (input_dim, hidden_dims[0]))
+                self.params['b1'] = np.zeros(hidden_dims[0])
+                if self.normalization in ['batchnorm', 'layernorm']:
+                    self.params['gamma1'] = np.ones(hidden_dims[0])
+                    self.params['beta1'] = np.zeros(hidden_dims[0])
+            elif i == len(hidden_dims):
+                self.params['W' + str(i + 1)] = np.random.normal(0, weight_scale, (hidden_dims[i - 1], num_classes))
+                self.params['b' + str(i + 1)] = np.zeros(num_classes)
+            else:
+                self.params['W' + str(i + 1)] = np.random.normal(0, weight_scale, (hidden_dims[i - 1], hidden_dims[i]))
+                self.params['b' + str(i + 1)] = np.zeros(hidden_dims[i])
+                if self.normalization in ['batchnorm', 'layernorm']:
+                    self.params['gamma' + str(i + 1)] = np.ones(hidden_dims[i])
+                    self.params['beta' + str(i + 1)] = np.zeros(hidden_dims[i])
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -281,7 +296,46 @@ class FullyConnectedNet(object):
         # self.bn_params[1] to the forward pass for the second batch normalization #
         # layer, etc.                                                              #
         ############################################################################
+        # Forward pass - store all caches in a list
+        caches = []
+        x = X
 
+        # Hidden layers: affine → [batch/layer norm] → relu → [dropout]
+        for i in range(self.num_layers - 1):
+            layer_idx = i + 1
+            w = self.params['W' + str(layer_idx)]
+            b = self.params['b' + str(layer_idx)]
+
+            # Affine
+            x, fc_cache = affine_forward(x, w, b)
+
+            # Batch/Layer normalization (optional)
+            bn_cache = None
+            if self.normalization == 'batchnorm':
+                gamma = self.params['gamma' + str(layer_idx)]
+                beta = self.params['beta' + str(layer_idx)]
+                x, bn_cache = batchnorm_forward(x, gamma, beta, self.bn_params[i])
+            elif self.normalization == 'layernorm':
+                gamma = self.params['gamma' + str(layer_idx)]
+                beta = self.params['beta' + str(layer_idx)]
+                x, bn_cache = layernorm_forward(x, gamma, beta, self.bn_params[i])
+
+            # ReLU
+            x, relu_cache = relu_forward(x)
+
+            # Dropout (optional)
+            dropout_cache = None
+            if self.use_dropout:
+                x, dropout_cache = dropout_forward(x, self.dropout_param)
+
+            # Store all caches for this layer as a tuple
+            cache = (fc_cache, bn_cache, relu_cache, dropout_cache)
+            caches.append(cache)
+
+        # Final layer: affine only (no activation, no normalization, no dropout)
+        w = self.params['W' + str(self.num_layers)]
+        b = self.params['b' + str(self.num_layers)]
+        scores, final_cache = affine_forward(x, w, b)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -304,7 +358,44 @@ class FullyConnectedNet(object):
         # automated tests, make sure that your L2 regularization includes a factor #
         # of 0.5 to simplify the expression for the gradient.                      #
         ############################################################################
+        # Backward pass
+        loss, dx = softmax_loss(scores, y)
 
+        # Add L2 regularization to loss
+        for i in range(self.num_layers):
+            loss += 0.5 * self.reg * np.sum(self.params['W' + str(i + 1)] ** 2)
+
+        # Backprop through final layer
+        dx, dw, db = affine_backward(dx, final_cache)
+        grads['W' + str(self.num_layers)] = dw + self.reg * self.params['W' + str(self.num_layers)]
+        grads['b' + str(self.num_layers)] = db
+
+        # Backprop through hidden layers (in reverse order)
+        for i in range(self.num_layers - 2, -1, -1):
+            layer_idx = i + 1
+            fc_cache, bn_cache, relu_cache, dropout_cache = caches[i]
+
+            # Dropout backward
+            if self.use_dropout:
+                dx = dropout_backward(dx, dropout_cache)
+
+            # ReLU backward
+            dx = relu_backward(dx, relu_cache)
+
+            # Batch/Layer normalization backward
+            if self.normalization == 'batchnorm':
+                dx, dgamma, dbeta = batchnorm_backward(dx, bn_cache)
+                grads['gamma' + str(layer_idx)] = dgamma
+                grads['beta' + str(layer_idx)] = dbeta
+            elif self.normalization == 'layernorm':
+                dx, dgamma, dbeta = layernorm_backward(dx, bn_cache)
+                grads['gamma' + str(layer_idx)] = dgamma
+                grads['beta' + str(layer_idx)] = dbeta
+
+            # Affine backward
+            dx, dw, db = affine_backward(dx, fc_cache)
+            grads['W' + str(layer_idx)] = dw + self.reg * self.params['W' + str(layer_idx)]
+            grads['b' + str(layer_idx)] = db
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
