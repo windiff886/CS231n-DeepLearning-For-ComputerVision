@@ -40,3 +40,5 @@
 # debug information files
 *.dwo
 **/.idea/
+
+*.npy
