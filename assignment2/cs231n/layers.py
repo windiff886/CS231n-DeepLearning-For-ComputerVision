@@ -749,7 +749,9 @@ def spatial_batchnorm_forward(x, gamma, beta, bn_param):
     # vanilla version of batch normalization you implemented above.           #
     # Your implementation should be very short; ours is less than five lines. #
     ###########################################################################
-
+    x_spatial = x.transpose(0, 2, 3, 1).reshape(-1, x.shape[1])  # Reshape to (N*H*W, C)
+    out_spatial, cache = batchnorm_forward(x_spatial, gamma, beta, bn_param)
+    out = out_spatial.reshape(x.shape[0], x.shape[2], x.shape[3], x.shape[1]).transpose(0, 3, 1, 2)
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -779,7 +781,10 @@ def spatial_batchnorm_backward(dout, cache):
     # vanilla version of batch normalization you implemented above.           #
     # Your implementation should be very short; ours is less than five lines. #
     ###########################################################################
-
+    N, C, H, W = dout.shape  # 保存原始形状
+    dout_spatial = dout.transpose(0, 2, 3, 1).reshape(-1, C)
+    dx_spatial, dgamma, dbeta = batchnorm_backward(dout_spatial, cache)
+    dx = dx_spatial.reshape(N, H, W, C).transpose(0, 3, 1, 2)
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -815,7 +820,25 @@ def spatial_groupnorm_forward(x, gamma, beta, G, gn_param):
     # the bulk of the code is similar to both train-time batch normalization  #
     # and layer normalization!                                                #
     ###########################################################################
+    N, C, H, W = x.shape
+    out = {}
+    cache = {}
+    size = C // G
 
+    # Group Normalization 不需要 running statistics，总是使用当前统计量
+    bn_param = {'mode': 'train', 'eps': eps}
+
+    for i in range(G):
+        # 将 gamma 和 beta 从 (1, C//G, 1, 1) reshape 成 1D (C//G,)
+        gamma_slice = gamma[:, i*size:(i+1)*size, :, :].reshape(-1)
+        beta_slice = beta[:, i*size:(i+1)*size, :, :].reshape(-1)
+        out[i], cache[i] = spatial_batchnorm_forward(
+            x[:, i*size:(i+1)*size, :, :],
+            gamma_slice,
+            beta_slice,
+            bn_param
+        )
+    out = np.concatenate([out[i] for i in range(G)], axis=1)
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -841,7 +864,19 @@ def spatial_groupnorm_backward(dout, cache):
     # TODO: Implement the backward pass for spatial group normalization.      #
     # This will be extremely similar to the layer norm implementation.        #
     ###########################################################################
-
+    N, C, H, W = dout.shape
+    G = len(cache)
+    size = C // G
+    dx = np.zeros_like(dout)
+    dgamma = np.zeros((1, C, 1, 1))
+    dbeta = np.zeros((1, C, 1, 1))
+    for i in range(G):
+        dx[:, i*size:(i+1)*size, :, :], dgamma_slice, dbeta_slice = spatial_batchnorm_backward(
+            dout[:, i*size:(i+1)*size, :, :],
+            cache[i]
+        )
+        dgamma[:, i*size:(i+1)*size, :, :] = dgamma_slice.reshape(1, size, 1, 1)
+        dbeta[:, i*size:(i+1)*size, :, :] = dbeta_slice.reshape(1, size, 1, 1)
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
