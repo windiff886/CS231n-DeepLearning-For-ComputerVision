@@ -138,7 +138,14 @@ class CaptioningRNN:
         #                                                                          #
         # You also don't have to implement the backward pass.                      #
         ############################################################################
-        # 
+        h0 = affine_forward(features, W_proj, b_proj)
+        word_vectors = word_embedding_forward(captions_in, W_embed)
+        if self.cell_type == "rnn":
+            h = rnn_forward(word_vectors, h0, Wx, Wh, b)
+        else:
+            h = lstm_forward(word_vectors, h0, Wx, Wh, b)
+        scores = temporal_affine_forward(h, W_vocab, b_vocab)
+        loss = temporal_softmax_loss(scores, captions_out, mask)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -202,7 +209,36 @@ class CaptioningRNN:
         # NOTE: we are still working over minibatches in this function. Also if   #
         # you are using an LSTM, initialize the first cell state to zeros.        #
         ###########################################################################
-        # 
+        # (1) 初始化隐藏状态：图像特征 → h0
+        h_prev = affine_forward(features, W_proj, b_proj)  # (N, H)
+
+        # 对于LSTM，初始化cell state为0
+        c_prev = None
+        if self.cell_type == 'lstm':
+            c_prev = torch.zeros_like(h_prev)
+
+        # (2) 初始化第一个词为 <START>
+        word = torch.full((N,), self._start, dtype=torch.long)
+
+        # (3) 循环生成每个时间步的词
+        for t in range(max_length):
+            # (a) 词嵌入：将词索引转为向量
+            embed = W_embed[word]  # (N, W)
+
+            # (b) RNN/LSTM单步前向传播
+            if self.cell_type == 'rnn':
+                h_prev = rnn_step_forward(embed, h_prev, Wx, Wh, b)  # (N, H)
+            else:  # lstm
+                h_prev, c_prev = lstm_step_forward(embed, h_prev, c_prev, Wx, Wh, b)
+
+            # (c) 隐藏状态 → 词汇分数
+            scores = affine_forward(h_prev, W_vocab, b_vocab)  # (N, V)
+
+            # (d) 贪心选择：选分数最高的词
+            word = scores.argmax(dim=1)  # (N,)
+
+            # (e) 保存到输出
+            captions[:, t] = word
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
