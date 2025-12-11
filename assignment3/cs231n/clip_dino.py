@@ -1,4 +1,4 @@
-from tensorflow.python.framework.ops import device_v2
+# from tensorflow.python.framework.ops import device_v2
 import torch
 import torch.nn as nn
 import numpy as np
@@ -26,6 +26,12 @@ def get_similarity_no_loop(text_features, image_features):
     ############################################################################
     # TODO: Compute the cosine similarity. Do NOT use for loops.               #
     ############################################################################
+    # Normalize the feature vectors
+    text_features_norm = text_features / text_features.norm(dim=1, keepdim=True)
+    image_features_norm = image_features / image_features.norm(dim=1, keepdim=True)
+
+    # Compute cosine similarity via matrix multiplication
+    similarity = text_features_norm @ image_features_norm.T
 
     ############################################################################
     #                             END OF YOUR CODE                             #
@@ -62,7 +68,14 @@ def clip_zero_shot_classifier(clip_model, clip_preprocess, images,
     ############################################################################
     # TODO: Find the class labels for images.                                  #
     ############################################################################
-
+    image = torch.stack([clip_preprocess(Image.fromarray(img)).to(device) for img in images])
+    with torch.no_grad():
+        image_features = clip_model.encode_image(image)
+        text_tokens = clip.tokenize(class_texts).to(device)
+        text_features = clip_model.encode_text(text_tokens)
+        similarity = get_similarity_no_loop(text_features, image_features)
+        pred_indices = similarity.argmax(dim=0)
+        pred_classes = [class_texts[idx] for idx in pred_indices.cpu().numpy()]
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
@@ -90,7 +103,10 @@ class CLIPImageRetriever:
         # computation for each text query. You may end up NOT using the above      #
         # similarity function for most compute-optimal implementation.#
         ############################################################################
-
+        self.clip_model = clip_model
+        self.clip_preprocess = clip_preprocess
+        self.device = device
+        self.images = images
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -113,7 +129,21 @@ class CLIPImageRetriever:
         ############################################################################
         # TODO: Retrieve the indices of top-k images.                              #
         ############################################################################
+        # Preprocess and encode all images
+        image_tensors = torch.stack([self.clip_preprocess(Image.fromarray(img)).to(self.device) for img in self.images])
+        with torch.no_grad():
+            image_features = self.clip_model.encode_image(image_tensors)
 
+            # Tokenize and encode the query text
+            text_tokens = clip.tokenize([query]).to(self.device)
+            text_features = self.clip_model.encode_text(text_tokens)
+
+            # Compute similarity between text and image features
+            similarity = get_similarity_no_loop(text_features, image_features)
+
+            # Get top-k indices
+            topk_values, topk_indices = similarity.topk(k=k, dim=1)
+            top_indices = topk_indices[0].cpu().tolist()
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
